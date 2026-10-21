@@ -64,12 +64,6 @@
     .discount.failed { border-color: var(--red); }
     .discount.failed .value { color: var(--red); }
 
-    .steps { list-style: none; margin: 16px auto 0; max-width: 520px; display: grid; gap: 6px; font-size: 1.05rem; text-align: left; }
-    .steps li { display: flex; gap: 10px; align-items: center; color: var(--hint); }
-    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--line); flex: none; }
-    .steps li.ok { color: var(--ink); } .steps li.ok .dot { background: var(--green); }
-    .steps li.err { color: var(--red); } .steps li.err .dot { background: var(--red); }
-    .steps li.skip .dot { background: #555; }
 
     .row { display: flex; gap: 10px; flex-wrap: wrap; margin: 24px auto 0; max-width: 520px; }
     button { font: inherit; font-size: 1.25rem; border-radius: 12px; padding: 12px 18px; min-height: 54px;
@@ -144,11 +138,6 @@
         <button class="small" id="undoBtn" disabled>Undo</button>
       </div>
 
-      <ul class="steps">
-        <li data-step="extref"><span class="dot"></span>External reference (TSHID + TSH ID)</li>
-        <li data-step="consumer"><span class="dot"></span>Name on the bill</li>
-        <li data-step="discount"><span class="dot"></span>Global discount</li>
-      </ul>
 
       <div class="row">
         <button id="againBtn">New tap</button>
@@ -295,7 +284,6 @@
     // ---------- UI ----------
     var busy = false, fakeTimer = null;
 
-    function setStep(step, state) { document.querySelector('[data-step="' + step + '"]').className = state || ''; }
     function setDiscount(state, text) {
       $('discountBox').className = 'discount ' + state;
       $('discountText').textContent = text;
@@ -315,7 +303,6 @@
       $('member-name').textContent = m.firstName + ' ' + m.lastName;
       $('member-segment').textContent = m.segment;
       $('member-meta').textContent = 'TSH ID ' + m.tshId + ' · ' + m.location + ' · valid until ' + m.validUntil;
-      ['extref', 'consumer', 'discount'].forEach(function (s) { setStep(s, ''); });
       setDiscount('', 'Applying…');
       $('idle-view').classList.add('hidden');
       $('member-view').classList.remove('hidden');
@@ -332,15 +319,12 @@
       log('— Tap (' + source + ') → ' + m.firstName + ' ' + m.lastName + ', ' + m.tshId + ' —');
       renderMember(m);
 
-      pos('pos_addExternalReference', [m.tshId, EXT_REF_PREFIX], -1).then(function (r) {
-        setStep('extref', hasError(r) ? 'err' : 'ok');
+      pos('pos_addExternalReference', [m.tshId, EXT_REF_PREFIX], -1).then(function () {
         // No identifier: that field references a Lightspeed consumer UUID.
         return pos('pos_setConsumer', [{ firstName: m.firstName, lastName: m.lastName }], -1);
-      }).then(function (r) {
-        setStep('consumer', hasError(r) ? 'err' : 'ok');
+      }).then(function () {
         return applyDiscount(code);
-      }).then(function (ok) {
-        setStep('discount', ok ? 'ok' : 'err');
+      }).then(function () {
         busy = false;
       });
     }
@@ -375,7 +359,6 @@
       }).then(function (r) {
         if (hasError(r)) { setDiscount('failed', 'Could not remove ' + code); return; }
         setDiscount('', 'Discount removed');
-        setStep('discount', 'skip');
       });
     }
 
