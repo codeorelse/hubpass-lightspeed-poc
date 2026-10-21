@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <title>Hub Pass POC</title>
+  <style>
+    :root {
+      --bg: #f4f2ee;
+      --card: #ffffff;
+      --ink: #1d1d1b;
+      --muted: #6b6a66;
+      --line: #e4e1da;
+      --accent: #1f5c4d;
+      --accent-ink: #ffffff;
+      --ok: #1f7a4a;
+      --ok-bg: #e5f3ea;
+      --warn: #8a5a00;
+      --warn-bg: #fbf0d9;
+      --err: #a12d2d;
+      --err-bg: #f8e3e3;
+      --code-bg: #1d1d1b;
+      --code-ink: #e9e6df;
+      --radius: 14px;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+      -webkit-font-smoothing: antialiased; }
+    body { padding: 20px 16px 40px; }
+    .wrap { max-width: 760px; margin: 0 auto; display: grid; gap: 16px; }
+
+    header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; letter-spacing: -0.01em; }
+    .brand-mark { width: 30px; height: 30px; border-radius: 8px; background: var(--accent); color: var(--accent-ink);
+      display: grid; place-items: center; font-size: 14px; font-weight: 800; }
+    .pill { font-size: 12px; font-weight: 600; padding: 5px 10px; border-radius: 999px; white-space: nowrap; }
+    .pill.live { background: var(--ok-bg); color: var(--ok); }
+    .pill.demo { background: var(--warn-bg); color: var(--warn); }
+
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; }
+
+    /* Waiting state */
+    #waiting { text-align: center; padding: 36px 20px; }
+    .pulse { width: 84px; height: 84px; margin: 0 auto 18px; border-radius: 50%; background: var(--accent);
+      display: grid; place-items: center; color: #fff; position: relative; }
+    .pulse::after { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 3px solid var(--accent);
+      animation: ring 1.8s ease-out infinite; }
+    @keyframes ring { from { transform: scale(1); opacity: .6; } to { transform: scale(1.6); opacity: 0; } }
+    #waiting h1 { font-size: 22px; margin: 0 0 6px; }
+    #waiting p { color: var(--muted); margin: 0 0 22px; }
+
+    /* Member card */
+    .member { display: grid; grid-template-columns: 112px 1fr; gap: 18px; align-items: center; }
+    .photo { width: 112px; height: 112px; border-radius: 18px; object-fit: cover; background: #dcd8cf; display: block; }
+    .photo-fallback { width: 112px; height: 112px; border-radius: 18px; background: var(--accent); color: #fff;
+      display: none; place-items: center; font-size: 38px; font-weight: 700; }
+    .member h2 { margin: 0 0 4px; font-size: 26px; letter-spacing: -0.02em; }
+    .meta { color: var(--muted); font-size: 15px; display: flex; flex-wrap: wrap; gap: 6px 14px; }
+    .meta b { color: var(--ink); font-weight: 600; }
+    .tags { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+    .tag { font-size: 13px; font-weight: 600; padding: 5px 10px; border-radius: 8px; background: #efece6; }
+    .tag.ok { background: var(--ok-bg); color: var(--ok); }
+
+    .discount { margin-top: 18px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 14px 16px; border-radius: 12px; border: 1px solid var(--line); }
+    .discount .label { font-size: 13px; color: var(--muted); }
+    .discount .value { font-size: 18px; font-weight: 700; }
+    .discount.applied { background: var(--ok-bg); border-color: transparent; }
+    .discount.failed { background: var(--err-bg); border-color: transparent; }
+    .discount.pending { background: #f6f4f0; }
+
+    .steps { list-style: none; padding: 0; margin: 16px 0 0; display: grid; gap: 6px; font-size: 14px; }
+    .steps li { display: flex; gap: 10px; align-items: center; color: var(--muted); }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--line); flex: none; }
+    .steps li.ok { color: var(--ink); } .steps li.ok .dot { background: var(--ok); }
+    .steps li.err { color: var(--err); } .steps li.err .dot { background: var(--err); }
+    .steps li.skip .dot { background: #c9c4b9; }
+
+    /* Buttons */
+    .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+    button { font: inherit; font-size: 16px; font-weight: 600; border-radius: 12px; padding: 14px 18px; min-height: 52px;
+      border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; flex: 1 1 auto; }
+    button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+    button.small { font-size: 13px; padding: 8px 12px; min-height: 36px; flex: 0 0 auto; }
+    button:active { transform: translateY(1px); }
+    button:disabled { opacity: .5; }
+
+    /* Settings + log */
+    details { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
+    summary { cursor: pointer; padding: 14px 20px; font-weight: 600; list-style: none; display: flex; justify-content: space-between; }
+    summary::-webkit-details-marker { display: none; }
+    summary::after { content: "+"; color: var(--muted); }
+    details[open] summary::after { content: "–"; }
+    .inner { padding: 0 20px 18px; }
+    .field { display: grid; gap: 6px; margin-bottom: 12px; font-size: 14px; }
+    .field span { color: var(--muted); }
+    select, input { font: inherit; font-size: 15px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: #fff; color: var(--ink); }
+    .hint { font-size: 13px; color: var(--muted); margin: 0 0 12px; }
+    pre#log { background: var(--code-bg); color: var(--code-ink); border-radius: 10px; padding: 12px; font-size: 12px;
+      line-height: 1.5; max-height: 340px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 0; }
+    .ctx { font-size: 12px; color: var(--muted); text-align: center; }
+
+    .hidden { display: none !important; }
+
+    @media (max-width: 520px) {
+      .member { grid-template-columns: 1fr; text-align: center; justify-items: center; }
+      .meta, .tags { justify-content: center; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand"><div class="brand-mark">HP</div>Hub Pass</div>
+      <span id="mode" class="pill demo">Demo mode</span>
+    </header>
+
+    <!-- 1. Waiting for a tap -->
+    <section id="waiting" class="card">
+      <div class="pulse" aria-hidden="true">
+        <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 8.3a6 6 0 0 1 0 7.4"/><path d="M9.5 6a10 10 0 0 1 0 12"/><path d="M13 4a14 14 0 0 1 0 16"/></svg>
+      </div>
+      <h1>Ask the guest to tap their Hub Pass</h1>
+      <p>Proof of concept: no real reader or member data. A scan or the button below loads a fake student.</p>
+      <div class="row" style="max-width:420px;margin:0 auto;">
+        <button class="primary" id="simulateBtn">Simulate tap</button>
+      </div>
+    </section>
+
+    <!-- 2. Member recognised -->
+    <section id="recognised" class="card hidden">
+      <div class="member">
+        <div>
+          <img id="photo" class="photo" alt="Student photo" />
+          <div id="photoFallback" class="photo-fallback"></div>
+        </div>
+        <div>
+          <h2 id="memberName"></h2>
+          <div class="meta">
+            <span>TSH ID <b id="memberTsh"></b></span>
+            <span id="memberLocation"></span>
+            <span>Valid until <b id="memberValid"></b></span>
+          </div>
+          <div class="tags">
+            <span class="tag" id="memberSegment"></span>
+            <span class="tag ok">Active</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="discountBox" class="discount pending">
+        <div>
+          <div class="label">Member discount</div>
+          <div class="value" id="discountText">Applying…</div>
+        </div>
+        <button class="small" id="undoBtn" disabled>Undo</button>
+      </div>
+
+      <ul class="steps" id="steps">
+        <li data-step="extref"><span class="dot"></span>External reference (HP + TSH ID)</li>
+        <li data-step="consumer"><span class="dot"></span>Consumer name on the bill</li>
+        <li data-step="discount"><span class="dot"></span>Global discount STU20</li>
+      </ul>
+
+      <div class="row">
+        <button id="againBtn">New tap</button>
+        <button id="checkoutBtn">Go to checkout</button>
+        <button class="primary" id="doneBtn">Done</button>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <details>
+      <summary>Test settings</summary>
+      <div class="inner">
+        <label class="field">
+          <span>Discount method</span>
+          <select id="method">
+            <option value="toggle">pos_toggleGlobalDiscount (check account first)</option>
+            <option value="apply">pos_applyGlobalManualDiscount (code only, undocumented)</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Discount code</span>
+          <input id="code" value="STU20" />
+        </label>
+        <p class="hint">Scans from the POS barcode scanner or NFC listener also trigger the fake student, so you can test with real hardware.</p>
+        <div class="row" style="margin-top:0">
+          <button class="small" id="btnAccount">Log current account</button>
+          <button class="small" id="btnDiscounts">Log available discounts</button>
+          <button class="small" id="btnContext">Log POS context</button>
+        </div>
+      </div>
+    </details>
+
+    <!-- Log -->
+    <details open>
+      <summary>Call log</summary>
+      <div class="inner">
+        <div class="row" style="margin:0 0 10px">
+          <button class="small" id="copyLog">Copy log</button>
+          <button class="small" id="clearLog">Clear</button>
+        </div>
+        <pre id="log"></pre>
+      </div>
+    </details>
+
+    <div class="ctx" id="ctx"></div>
+  </div>
+
+  <script>
+  (function () {
+    'use strict';
+
+    // ---------- Fake member (POC only) ----------
+    var STUDENT = {
+      tshId: 'S7Q4M',
+      firstName: 'Lucía',
+      lastName: 'Martínez',
+      segment: 'Student',
+      location: 'Barcelona',
+      validUntil: '30 Jun 2027',
+      // Placeholder portrait; falls back to initials if it can't load.
+      photo: 'https://randomuser.me/api/portraits/women/44.jpg'
+    };
+    var EXT_REF_PREFIX = 'HP';
+
+    // ---------- Helpers ----------
+    var $ = function (id) { return document.getElementById(id); };
+    var logEl = $('log');
+
+    function stamp() { return new Date().toLocaleTimeString('en-GB', { hour12: false }); }
+    function fmt(v) {
+      if (v === undefined) return 'undefined';
+      try { return JSON.stringify(v, null, 2); } catch (e) { return String(v); }
+    }
+    function log(line, data) {
+      logEl.textContent += '[' + stamp() + '] ' + line + (data !== undefined ? '\n' + fmt(data) : '') + '\n';
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    // ---------- Lightspeed bridge detection + demo stubs ----------
+    var LIVE = typeof window.pos_toggleGlobalDiscount === 'function';
+    $('mode').textContent = LIVE ? 'Lightspeed' : 'Demo mode';
+    $('mode').className = 'pill ' + (LIVE ? 'live' : 'demo');
+
+    var demoAccount = { discounts: [] };
+    function demoCb(cb, data) { if (typeof cb === 'function') setTimeout(function () { cb({ data: data, error: null }); }, 150); }
+    var DEMO = {
+      pos_addExternalReference: function () {},
+      pos_setConsumer: function () {},
+      pos_close: function () { log('(demo) web view would close now'); },
+      pos_navigateToCheckoutView: function () { log('(demo) POS would go to checkout'); },
+      pos_onBarcodeScanEvent: function () {},
+      pos_onNFCEvent: function () {},
+      pos_getCurrentAccount: function (cb) { demoCb(cb, JSON.parse(JSON.stringify(demoAccount))); },
+      pos_getAvailableDiscounts: function (cb) { demoCb(cb, [{ code: 'STU20', name: 'Student 20%' }]); },
+      pos_toggleGlobalDiscount: function (code, cb) {
+        var i = demoAccount.discounts.indexOf(code);
+        if (i >= 0) demoAccount.discounts.splice(i, 1); else demoAccount.discounts.push(code);
+        demoCb(cb, { ok: true });
+      },
+      pos_applyGlobalManualDiscount: function (code, value, cb) {
+        if (demoAccount.discounts.indexOf(code) < 0) demoAccount.discounts.push(code);
+        demoCb(cb, { ok: true });
+      }
+    };
+
+    // Calls a pos_* function, logs the call and its callback response.
+    // cbIndex = position of the callback argument (or -1 if none).
+    // noTimeout = true for listeners that only call back on a scan.
+    function pos(name, args, cbIndex, noTimeout) {
+      args = args || [];
+      var fn = LIVE ? window[name] : DEMO[name];
+      log('→ ' + name + '(' + args.map(function (a) { return JSON.stringify(a); }).join(', ') + ')');
+      return new Promise(function (resolve) {
+        if (typeof fn !== 'function') {
+          log('✗ ' + name + ' is not available in this POS version');
+          resolve({ error: { message: name + ' not available' }, data: null, missing: true });
+          return;
+        }
+        var callArgs = args.slice();
+        if (cbIndex >= 0) {
+          var done = false;
+          callArgs[cbIndex] = function (response) {
+            if (done) return; done = true;
+            log('← ' + name, response);
+            resolve(response || {});
+          };
+          // Safety net: some functions never call back.
+          if (!noTimeout) setTimeout(function () {
+            if (!done) { done = true; log('… ' + name + ': no callback after 5 s'); resolve({ timeout: true }); }
+          }, 5000);
+        }
+        try {
+          fn.apply(window, callArgs);
+          if (cbIndex < 0) resolve({});
+        } catch (e) {
+          log('✗ ' + name + ' threw: ' + e.message);
+          resolve({ error: { message: e.message } });
+        }
+      });
+    }
+
+    function hasError(r) { return !r || r.error || r.missing || r.timeout; }
+
+    // Is the discount code already on the current account? Heuristic for the POC:
+    // the account schema isn't documented, so search the JSON for the code.
+    function accountHasCode(code) {
+      return pos('pos_getCurrentAccount', [null], 0).then(function (r) {
+        if (hasError(r)) return null;
+        return JSON.stringify(r.data || '').indexOf('"' + code + '"') >= 0;
+      });
+    }
+
+    // ---------- UI state ----------
+    var busy = false;
+    var discountOn = false;
+
+    function setStep(step, state) {
+      var li = document.querySelector('[data-step="' + step + '"]');
+      li.className = state || '';
+    }
+    function setDiscount(state, text) {
+      $('discountBox').className = 'discount ' + state;
+      $('discountText').textContent = text;
+      $('undoBtn').disabled = state !== 'applied';
+      $('undoBtn').textContent = 'Undo';
+    }
+
+    function showWaiting() {
+      $('recognised').classList.add('hidden');
+      $('waiting').classList.remove('hidden');
+    }
+
+    function renderMember(m) {
+      $('memberName').textContent = m.firstName + ' ' + m.lastName;
+      $('memberTsh').textContent = m.tshId;
+      $('memberLocation').textContent = m.location;
+      $('memberValid').textContent = m.validUntil;
+      $('memberSegment').textContent = m.segment;
+      var img = $('photo'), fb = $('photoFallback');
+      fb.textContent = m.firstName.charAt(0) + m.lastName.charAt(0);
+      img.style.display = 'block'; fb.style.display = 'none';
+      img.onerror = function () { img.style.display = 'none'; fb.style.display = 'grid'; };
+      img.src = m.photo;
+      ['extref', 'consumer', 'discount'].forEach(function (s) { setStep(s, ''); });
+      setDiscount('pending', 'Applying…');
+      $('waiting').classList.add('hidden');
+      $('recognised').classList.remove('hidden');
+    }
+
+    // ---------- Recognition flow ----------
+    function onTap(source) {
+      if (busy) { log('Tap ignored: still processing the previous one'); return; }
+      busy = true;
+      var m = STUDENT, code = $('code').value.trim();
+      log('— Tap (' + source + ') → fake student ' + m.tshId + ' —');
+      renderMember(m);
+
+      // 1. TSH ID on the sale (no callback)
+      pos('pos_addExternalReference', [m.tshId, EXT_REF_PREFIX], -1).then(function (r) {
+        setStep('extref', hasError(r) ? 'err' : 'ok');
+
+        // 2. Name on the bill (no callback). No identifier: that field is a Lightspeed consumer UUID.
+        return pos('pos_setConsumer', [{ firstName: m.firstName, lastName: m.lastName }], -1);
+      }).then(function (r) {
+        setStep('consumer', hasError(r) ? 'err' : 'ok');
+
+        // 3. Discount
+        return applyDiscount(code);
+      }).then(function (ok) {
+        setStep('discount', ok ? 'ok' : 'err');
+        busy = false;
+      });
+    }
+
+    function applyDiscount(code) {
+      var method = $('method').value;
+      if (method === 'apply') {
+        return pos('pos_applyGlobalManualDiscount', [code, undefined, null], 2).then(function (r) {
+          if (hasError(r)) { setDiscount('failed', 'Could not apply ' + code); return false; }
+          discountOn = true; setDiscount('applied', code + ' · Student 20% applied'); return true;
+        });
+      }
+      // toggle: only toggle when the code isn't already on the account
+      return accountHasCode(code).then(function (already) {
+        if (already === true) {
+          log(code + ' already on the account, not toggling');
+          discountOn = true; setDiscount('applied', code + ' · Student 20% (already applied)'); return true;
+        }
+        if (already === null) log('Could not read account; toggling anyway');
+        return pos('pos_toggleGlobalDiscount', [code, null], 1).then(function (r) {
+          if (hasError(r)) { setDiscount('failed', 'Could not apply ' + code); return false; }
+          discountOn = true; setDiscount('applied', code + ' · Student 20% applied'); return true;
+        });
+      });
+    }
+
+    function undoDiscount() {
+      var code = $('code').value.trim();
+      $('undoBtn').disabled = true;
+      // Both methods: toggling removes it. Check first so we don't re-add it.
+      accountHasCode(code).then(function (on) {
+        if (on === false) { log(code + ' not on the account, nothing to undo'); return { data: 'noop' }; }
+        return pos('pos_toggleGlobalDiscount', [code, null], 1);
+      }).then(function (r) {
+        if (hasError(r)) { setDiscount('failed', 'Could not remove ' + code); return; }
+        discountOn = false;
+        setDiscount('pending', 'Discount removed');
+        setStep('discount', 'skip');
+      });
+    }
+
+    // ---------- Scanner listeners (fire once; re-register in the callback) ----------
+    function listenBarcode() {
+      pos('pos_onBarcodeScanEvent', [null], 0, true).then(function (r) {
+        if (r.missing) return;
+        onTap('barcode: ' + fmt(r.data));
+        listenBarcode();
+      });
+    }
+    function listenNfc() {
+      pos('pos_onNFCEvent', [null], 0, true).then(function (r) {
+        if (r.missing) return;
+        onTap('nfc: ' + fmt(r.data));
+        listenNfc();
+      });
+    }
+
+    // ---------- Wire up ----------
+    $('simulateBtn').onclick = function () { onTap('simulated'); };
+    $('againBtn').onclick = showWaiting;
+    $('undoBtn').onclick = undoDiscount;
+    $('doneBtn').onclick = function () { pos('pos_close', [], -1); };
+    $('checkoutBtn').onclick = function () { pos('pos_navigateToCheckoutView', [], -1); };
+    $('btnAccount').onclick = function () { pos('pos_getCurrentAccount', [null], 0); };
+    $('btnDiscounts').onclick = function () { pos('pos_getAvailableDiscounts', [null], 0); };
+    $('btnContext').onclick = function () { log('posContext', window.posContext || '(not available)'); };
+    $('clearLog').onclick = function () { logEl.textContent = ''; };
+    $('copyLog').onclick = function () {
+      var text = logEl.textContent;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () { log('Log copied'); }, fallbackCopy);
+      } else { fallbackCopy(); }
+      function fallbackCopy() {
+        var range = document.createRange(); range.selectNodeContents(logEl);
+        var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+        try { document.execCommand('copy'); log('Log copied'); } catch (e) { log('Copy failed, select the log manually'); }
+      }
+    };
+
+    var c = window.posContext;
+    $('ctx').textContent = c
+      ? (c.businessName || '') + ' · location ' + (c.locationId || '?') + ' · ' + (c.deviceName || '') + ' · ' + (c.userName || '')
+      : 'Not running inside Lightspeed: pos_* calls are simulated';
+
+    log('Hub Pass POC loaded · ' + (LIVE ? 'Lightspeed bridge found' : 'no Lightspeed bridge, demo stubs active'));
+    if (LIVE) {
+      pos('pos_getAvailableDiscounts', [null], 0);
+      listenBarcode();
+      listenNfc();
+    }
+  })();
+  </script>
+</body>
+</html>
