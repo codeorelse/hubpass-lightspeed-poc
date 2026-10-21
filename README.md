@@ -7,7 +7,7 @@ Proof of concept for Hub Pass member recognition in Lightspeed K-Series, styled 
 1. Shows "Waiting for tap..." and fakes a tap after 2 seconds. Barcode and NFC scans on the POS also trigger it.
 2. The logo twirls into a green check and a fake student appears: Emma de Vries, TSH ID `S7Q4M`, segment Student, Amsterdam City.
 3. Calls, in order:
-   - `pos_addExternalReference("S7Q4M", "HP")`
+   - `pos_addExternalReference("S7Q4M", "TSHID")`
    - `pos_setConsumer({ firstName, lastName })`
    - the global discount `STU20` (Student 20%)
 4. **Undo** removes the discount, **New tap** starts over, **Checkout** and **Done** hand back to the POS.
