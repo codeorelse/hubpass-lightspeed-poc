@@ -53,6 +53,8 @@
       .wrap { max-width: 960px; }
       #member-view:not(.hidden) { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; }
       #member-view .discount { margin-top: 0; }
+      #member-view .member-actions { text-align: left; }
+      #member-meta { margin: 0 0 16px; }
       #member-view .discount, #member-view .row { max-width: none; }
     }
     #member-photo { width: 150px; height: 150px; border-radius: 50%; object-fit: cover; background: #222;
@@ -60,7 +62,7 @@
     #member-name { font-size: clamp(2.4rem, 7vw, 3.6rem); margin-bottom: 6px; }
     #member-segment { font-size: 1.6rem; color: #ccc; margin-bottom: 4px; }
     #member-status { font-size: 1.6rem; color: var(--green); margin-bottom: 10px; }
-    #member-meta { font-size: 1.2rem; color: var(--hint); white-space: pre-line; line-height: 1.4; }
+    #member-meta { font-size: 1.2rem; color: var(--hint); white-space: pre-line; line-height: 1.4; margin-top: 24px; }
 
     .discount { margin: 28px auto 0; max-width: 520px; display: flex; align-items: center; justify-content: space-between;
       gap: 12px; padding: 16px 18px; border-radius: 14px; border: 1px solid var(--line); text-align: left; }
@@ -136,10 +138,10 @@
       <h1 id="member-name"></h1>
       <p id="member-segment"></p>
       <p id="member-status">Active member</p>
-      <p id="member-meta"></p>
       </div>
 
       <div class="member-actions">
+      <p id="member-meta"></p>
       <div id="discountBox" class="discount">
         <div>
           <div class="label">Member discount</div>
