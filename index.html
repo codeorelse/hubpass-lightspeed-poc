@@ -45,6 +45,23 @@
     /* Idle */
     #idle-view { text-align: center; padding: 48px 0 56px; }
     #idle-view .hint { font-size: clamp(2rem, 6vw, 3.5rem); color: var(--hint); letter-spacing: -0.02em; }
+    .poll-status { font-size: .95rem; color: #555; margin-top: 16px; min-height: 1.3em; }
+    .poll-status.error { color: var(--red); }
+
+    /* Pair device */
+    #pair-view { text-align: center; padding: 8px 0 24px; }
+    #pair-view h1 { font-size: clamp(2.2rem, 6vw, 3.2rem); margin-bottom: 10px; }
+    #pair-view .lead { font-size: 1.25rem; color: var(--hint); max-width: 480px; margin: 0 auto 28px; line-height: 1.4; }
+    #pair-form { max-width: 420px; margin: 0 auto; display: grid; gap: 14px; }
+    #pairCode { font-size: 2rem; text-align: center; letter-spacing: .2em; text-transform: uppercase;
+      font-family: ui-monospace, Menlo, monospace; padding: 14px 12px; border-radius: 14px; }
+    #pairCode::placeholder { letter-spacing: .05em; color: #444; }
+    .pair-reader { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; text-align: left; }
+    .pair-reader .field { margin: 0; }
+    #pair-view.paired h1 { color: var(--green); }
+    #pairMsg { min-height: 1.4em; font-size: 1.05rem; color: var(--hint); }
+    #pairMsg.error { color: var(--red); }
+    #pairDevice { font-size: .95rem; color: #666; margin-top: 18px; }
 
     /* Member */
     #member-view { text-align: center; }
@@ -128,8 +145,33 @@
     </div>
     <p class="mode" id="mode">Demo mode</p>
 
-    <section id="idle-view">
+    <section id="checking-view">
+      <p class="mode">Checking device…</p>
+    </section>
+
+    <section id="pair-view" class="hidden">
+      <h1>Pair this device</h1>
+      <p class="lead">Ask a manager for a pairing code from the Membership Platform admin and enter it below.</p>
+      <form id="pair-form" autocomplete="off">
+        <input id="pairCode" inputmode="text" autocapitalize="characters" autocorrect="off" spellcheck="false"
+               maxlength="9" placeholder="XXXX-XXXX" aria-label="Pairing code" />
+        <div class="pair-reader">
+          <label class="field">Door ID
+            <input id="pairDoor" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Hub Pass reader door" />
+          </label>
+          <label class="field">Area ID
+            <input id="pairArea" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Area this till serves" />
+          </label>
+        </div>
+        <button type="submit" class="primary" id="pairBtn">Pair device</button>
+        <p id="pairMsg" role="status"></p>
+      </form>
+      <p id="pairDevice"></p>
+    </section>
+
+    <section id="idle-view" class="hidden">
       <p class="hint">Waiting for tap...</p>
+      <p id="pollStatus" class="poll-status"></p>
     </section>
 
     <section id="member-view" class="hidden">
@@ -169,10 +211,16 @@
               <option value="apply">pos_applyGlobalManualDiscount (code only, undocumented)</option>
             </select>
           </label>
-          <label class="field">Discount code
+          <label class="field">Discount code for fake taps
             <input id="code" value="STU20" />
           </label>
-          <p class="note">Proof of concept: the tap is faked 2 seconds after the waiting screen appears. Barcode and NFC scans on the POS also trigger it.</p>
+          <p class="note">While the waiting screen is up, the till asks the Membership Service for a pending tap once a second. "Fake tap" shows a test member locally and applies the code below.</p>
+          <p class="note">Device token: stored on the POS under <code>apiToken</code> via pos_storeData. Clear it to see the pairing screen again.</p>
+          <div class="row" style="margin-bottom:12px">
+            <button class="small" id="btnTokenClear">Clear stored token</button>
+            <button class="small" id="btnTokenFake">Paste token</button>
+            <button class="small" id="btnFakeTap">Fake tap</button>
+          </div>
           <div class="row">
             <button class="small" id="btnAccount">Log current account</button>
             <button class="small" id="btnDiscounts">Log available discounts</button>
@@ -205,12 +253,20 @@
       tshId: 'S7Q4M',
       firstName: 'Emma',
       lastName: 'de Vries',
-      segment: 'Student',
-      location: 'Amsterdam City',
-      validUntil: '30 Jun 2027'
+      segments: ['Member', 'Student'],
+      status: 'active'
     };
     var EXT_REF_PREFIX = 'TSHID';
-    var FAKE_TAP_DELAY_MS = 2000;
+    var TOKEN_KEY = 'apiToken';
+    var API_BASE = 'https://api.dev.guestplatform.thesocialhub.app';
+    var QS = new URLSearchParams(location.search);
+    // A URL param counts only if Lightspeed replaced its {placeholder}.
+    function qp(name) { var v = QS.get(name); return v && !/^\{.*\}$/.test(v) ? v.trim() : null; }
+    // Lightspeed fills this in from the Back Office URL: index.html?deviceId={deviceId}
+    var CTX = window.posContext || {};
+    var DEVICE_ID = qp('deviceId') || (CTX.deviceId ? String(CTX.deviceId) : null);
+    var LOCATION_ID = qp('locationId') || (CTX.locationId ? String(CTX.locationId) : null);
+    var DEVICE_NAME = qp('deviceName') || (CTX.deviceName ? String(CTX.deviceName) : null);
 
     // ---------- Helpers ----------
     var $ = function (id) { return document.getElementById(id); };
@@ -230,6 +286,8 @@
     $('mode').textContent = LIVE ? 'Lightspeed · Proof of concept' : 'Demo mode · Proof of concept';
 
     var demoAccount = { discounts: [] };
+    // Demo stand-in for the POS device store; resets on reload (no token = pair screen).
+    var demoStore = {};
     function demoCb(cb, data) { if (typeof cb === 'function') setTimeout(function () { cb({ data: data, error: null }); }, 150); }
     var DEMO = {
       pos_addExternalReference: function () {},
@@ -246,16 +304,35 @@
       pos_applyGlobalManualDiscount: function (code, value, cb) {
         if (demoAccount.discounts.indexOf(code) < 0) demoAccount.discounts.push(code);
         demoCb(cb, { ok: true });
-      }
+      },
+      pos_storeData: function (key, value) { demoStore[key] = value; },
+      pos_loadData: function (key, cb) { demoCb(cb, demoStore.hasOwnProperty(key) ? demoStore[key] : null); }
     };
+
+    // Never print a token in full in the call log.
+    function mask(v) {
+      if (typeof v !== 'string' || !v) return v;
+      return v.length <= 8 ? '••••' : v.slice(0, 4) + '…' + v.slice(-2) + ' (' + v.length + ' chars)';
+    }
+    function maskDeep(v) {
+      if (typeof v === 'string') return mask(v);
+      if (v && typeof v === 'object') {
+        var out = Array.isArray(v) ? [] : {};
+        Object.keys(v).forEach(function (k) { out[k] = k === 'error' ? v[k] : maskDeep(v[k]); });
+        return out;
+      }
+      return v;
+    }
 
     // Calls a pos_* function and logs the call and its callback response.
     // cbIndex = position of the callback argument (-1 if none).
     // noTimeout = true for listeners that only call back on a scan.
-    function pos(name, args, cbIndex, noTimeout) {
+    // secret = true masks string values (tokens) in the log.
+    function pos(name, args, cbIndex, noTimeout, secret) {
       args = args || [];
       var fn = LIVE ? window[name] : DEMO[name];
-      log('→ ' + name + '(' + args.map(function (a) { return JSON.stringify(a); }).join(', ') + ')');
+      var shown = secret ? args.map(function (a, i) { return i === 0 ? a : mask(a); }) : args;
+      log('→ ' + name + '(' + shown.map(function (a) { return JSON.stringify(a); }).join(', ') + ')');
       return new Promise(function (resolve) {
         if (typeof fn !== 'function') {
           log('✗ ' + name + ' is not available here');
@@ -267,7 +344,7 @@
           var done = false;
           callArgs[cbIndex] = function (response) {
             if (done) return; done = true;
-            log('← ' + name, response);
+            log('← ' + name, secret ? maskDeep(response) : response);
             resolve(response || {});
           };
           if (!noTimeout) setTimeout(function () {
@@ -295,7 +372,7 @@
     }
 
     // ---------- UI ----------
-    var busy = false, fakeTimer = null;
+    var busy = false;
 
     function setDiscount(state, text) {
       $('discountBox').className = 'discount ' + state;
@@ -304,46 +381,364 @@
     }
     function twirl(on) { $('brand-flip').classList.toggle('show-check', on); }
 
-    function showIdle() {
-      twirl(false);
-      $('member-view').classList.add('hidden');
-      $('idle-view').classList.remove('hidden');
-      clearTimeout(fakeTimer);
-      fakeTimer = setTimeout(function () { onTap('fake tap after 2 s'); }, FAKE_TAP_DELAY_MS);
+    var VIEWS = ['checking-view', 'pair-view', 'idle-view', 'member-view'];
+    function showView(id) {
+      VIEWS.forEach(function (v) { $(v).classList.toggle('hidden', v !== id); });
     }
 
-    function renderMember(m) {
-      $('member-name').textContent = m.firstName + ' ' + m.lastName;
-      $('member-segment').textContent = m.segment;
-      $('member-meta').textContent = 'TSH ID ' + m.tshId + ' · ' + m.location + '\nValid until ' + m.validUntil;
-      setDiscount('', 'Applying…');
-      $('idle-view').classList.add('hidden');
-      $('member-view').classList.remove('hidden');
-      twirl(true);
-      setTimeout(function () { twirl(false); }, 2200);
+    // ---------- Device pairing ----------
+    var apiToken = null, recognitionStarted = false;
+
+    // pos_loadData's callback shape isn't documented: accept a plain string,
+    // or an object carrying the value.
+    function tokenFrom(data) {
+      if (typeof data === 'string') return data.trim() || null;
+      if (data && typeof data === 'object') {
+        var v = data.value !== undefined ? data.value : data[TOKEN_KEY];
+        return typeof v === 'string' && v.trim() ? v.trim() : null;
+      }
+      return null;
+    }
+
+    function loadToken() {
+      return pos('pos_loadData', [TOKEN_KEY, null], 1, false, true).then(function (r) {
+        if (hasError(r)) { log('Could not read ' + TOKEN_KEY + ' from the device'); return null; }
+        return tokenFrom(r.data);
+      });
+    }
+
+    function setPairMsg(text, isError) {
+      $('pairMsg').textContent = text || '';
+      $('pairMsg').className = isError ? 'error' : '';
+    }
+
+    function showPair(message, isError) {
+      stopPolling();
+      twirl(false);
+      $('pair-view').classList.remove('paired');
+      $('pair-view').querySelector('h1').textContent = 'Pair this device';
+      setPairMsg(message, isError);
+      if (!$('pairDoor').value && qp('doorId')) $('pairDoor').value = qp('doorId');
+      if (!$('pairArea').value && qp('areaId')) $('pairArea').value = qp('areaId');
+      $('pairDevice').textContent = DEVICE_ID
+        ? 'Device ID ' + DEVICE_ID + (DEVICE_NAME ? ' · ' + DEVICE_NAME : '') + (LOCATION_ID ? ' · location ' + LOCATION_ID : '')
+        : 'No device ID found: add ?deviceId={deviceId} to the extension URL';
+      $('pairBtn').disabled = !DEVICE_ID;
+      $('pairBtn').textContent = 'Pair device';
+      showView('pair-view');
+      setTimeout(function () { $('pairCode').focus(); }, 50);
+    }
+
+    // POST /pos/pair. Resolves { ok, status, body } and never rejects.
+    function postPair(payload) {
+      var url = API_BASE + '/pos/pair';
+      log('→ POST ' + url, Object.assign({}, payload, { code: '••••' }));
+      var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+      var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, 15000);
+      return fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: ctrl ? ctrl.signal : undefined
+      }).then(function (res) {
+        return res.text().then(function (txt) {
+          var body = null;
+          try { body = txt ? JSON.parse(txt) : null; } catch (e) { body = { raw: txt }; }
+          log('← ' + res.status + ' /pos/pair', maskDeep(body));
+          return { ok: res.ok, status: res.status, body: body };
+        });
+      }).catch(function (err) {
+        // A CORS refusal also lands here: the browser hides the real response.
+        log('✗ /pos/pair failed: ' + (err.name === 'AbortError' ? 'timed out after 15 s' : err.message));
+        return { ok: false, status: 0, body: null, timeout: err.name === 'AbortError' };
+      }).then(function (r) { clearTimeout(timer); return r; });
+    }
+
+    function pairErrorText(r) {
+      var code = r.body && r.body.error;
+      if (r.status === 429 || code === 'rate_limited') return 'Too many attempts. Wait a minute and try again.';
+      if (code === 'invalid_code') return 'That code isn’t valid or has expired. Ask for a new one.';
+      if (r.status === 400) return 'The request was rejected' + (code ? ' (' + code + ')' : '') + '. Check the device, door and area IDs.';
+      if (r.status === 0) return r.timeout
+        ? 'The Membership Service didn’t respond. Check the connection and try again.'
+        : 'Couldn’t reach the Membership Service (network or CORS).';
+      return 'Pairing failed (' + r.status + (code ? ' ' + code : '') + '). Try again.';
+    }
+
+    // Pairing codes look like BHPZ-HH6T: 4 + 4 letters/digits.
+    function formatCode(v) {
+      var s = String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+      return s.length > 4 ? s.slice(0, 4) + '-' + s.slice(4) : s;
+    }
+    var CODE_RE = /^[A-Z0-9]{4}-[A-Z0-9]{4}$/;
+
+    function onPairSubmit(e) {
+      e.preventDefault();
+      var code = formatCode($('pairCode').value);
+      $('pairCode').value = code;
+      var doorId = $('pairDoor').value.trim();
+      var areaId = $('pairArea').value.trim();
+      if (!DEVICE_ID) { setPairMsg('No device ID in the URL, pairing is not possible.', true); return; }
+      if (!code) { setPairMsg('Enter the pairing code first.', true); $('pairCode').focus(); return; }
+      if (!CODE_RE.test(code)) { setPairMsg('A pairing code has 8 characters, like BHPZ-HH6T.', true); $('pairCode').focus(); return; }
+      if (!doorId || !areaId) { setPairMsg('Enter the door ID and area ID of the reader this till serves.', true); return; }
+
+      var payload = { code: code, deviceId: DEVICE_ID, doorId: doorId, areaId: areaId };
+      if (LOCATION_ID) payload.locationId = LOCATION_ID;
+      if (DEVICE_NAME) payload.deviceName = DEVICE_NAME;
+
+      $('pairBtn').disabled = true;
+      $('pairBtn').textContent = 'Pairing…';
+      setPairMsg('');
+
+      postPair(payload).then(function (r) {
+        var token = r.ok && r.body && typeof r.body.token === 'string' ? r.body.token : null;
+        if (!token) {
+          $('pairBtn').disabled = false;
+          $('pairBtn').textContent = 'Pair device';
+          setPairMsg(r.ok ? 'Paired, but no token came back. Ask for a new code.' : pairErrorText(r), true);
+          return;
+        }
+        // The token is only returned once: keep it in memory first, then
+        // store it and read it back to be sure it survived.
+        apiToken = token;
+        return pos('pos_storeData', [TOKEN_KEY, token], -1, false, true).then(function () {
+          return loadToken();
+        }).then(function (stored) {
+          var device = r.body.device || {};
+          if (stored !== token) {
+            log('⚠ Token not read back from the device store; it only lives in memory until the extension closes');
+          }
+          $('pairCode').value = '';
+          $('pair-view').classList.add('paired');
+          $('pair-view').querySelector('h1').textContent = 'Device paired';
+          setPairMsg((device.label ? device.label + ' is' : 'This till is') + ' now linked to Hub Pass.' +
+            (stored !== token ? ' The token couldn’t be saved, so you’ll need to pair again next time.' : ''),
+            stored !== token);
+          $('pairBtn').textContent = 'Paired';
+          twirl(true);
+          setTimeout(startRecognition, 1800);
+        });
+      });
+    }
+
+    function startRecognition() {
+      showIdle();
+      if (recognitionStarted) return;
+      recognitionStarted = true;
+      if (LIVE) {
+        pos('pos_getAvailableDiscounts', [null], 0);
+        listen('pos_onBarcodeScanEvent');
+        listen('pos_onNFCEvent');
+      }
+    }
+
+    function boot() {
+      showView('checking-view');
+      loadToken().then(function (token) {
+        apiToken = token;
+        if (token) { log('Device token found, starting recognition'); startRecognition(); }
+        else { log('No device token, showing pairing screen'); showPair(); }
+      });
+    }
+
+    function showIdle() {
+      twirl(false);
+      showView('idle-view');
+      startPolling();
+    }
+
+    // ---------- Polling for taps ----------
+    // POST /pos/pending-tap/claim once a second while the waiting screen is up.
+    // 204 = nothing waiting, 200 = a tap for this till, 409 = another till took it.
+    var POLL_MS = 1000;
+    var pollTimer = null, polling = false, pollSeq = 0, pollFails = 0;
+    var USER_ID = qp('userId') || (CTX.userId ? String(CTX.userId) : null);
+
+    function setPollStatus(text, isError) {
+      $('pollStatus').textContent = text;
+      $('pollStatus').className = 'poll-status' + (isError ? ' error' : '');
+    }
+
+    function startPolling() {
+      if (polling) return;
+      polling = true; pollFails = 0;
+      var seq = ++pollSeq;
+      log('Polling for taps every ' + POLL_MS / 1000 + ' s');
+      setPollStatus('Listening for taps');
+      pollOnce(seq);
+    }
+
+    function stopPolling() {
+      if (!polling) return;
+      polling = false; pollSeq++;
+      clearTimeout(pollTimer);
+    }
+
+    function scheduleNext(seq, ms) {
+      if (!polling || seq !== pollSeq) return;
+      pollTimer = setTimeout(function () { pollOnce(seq); }, ms);
+    }
+
+    function pollOnce(seq) {
+      if (!polling || seq !== pollSeq || !apiToken) return;
+      claimTap().then(function (r) {
+        if (!polling || seq !== pollSeq) return;   // stopped meanwhile; a claimed tap would be lost, see note in claimTap
+        if (r.status === 204) {
+          pollFails = 0;
+          setPollStatus('Listening for taps · checked ' + stamp());
+          scheduleNext(seq, POLL_MS);
+        } else if (r.status === 200 && r.body) {
+          pollFails = 0;
+          stopPolling();
+          onTap('claim ' + (r.body.tapId || ''), r.body);
+        } else if (r.status === 409) {
+          log('Tap already claimed by another till');
+          scheduleNext(seq, POLL_MS);
+        } else if (r.status === 401 || r.status === 403) {
+          stopPolling();
+          log('Device token rejected (' + r.status + '): clearing it, pair again');
+          apiToken = null;
+          pos('pos_storeData', [TOKEN_KEY, ''], -1).then(function () {
+            showPair('This till is no longer paired. Ask for a new pairing code.', true);
+          });
+        } else if (r.status === 429) {
+          var wait = Math.max(5, parseInt(r.reset, 10) || 0);
+          log('Rate limited, pausing polling for ' + wait + ' s');
+          setPollStatus('Too many checks, pausing ' + wait + ' s', true);
+          scheduleNext(seq, wait * 1000);
+        } else {
+          // Network error, CORS refusal or 5xx: back off up to 10 s and keep trying.
+          pollFails++;
+          var backoff = Math.min(10000, POLL_MS * Math.pow(2, pollFails - 1));
+          setPollStatus('Can’t reach the Membership Service, retrying', true);
+          scheduleNext(seq, backoff);
+        }
+      });
+    }
+
+    // Resolves { status, body, reset }; never rejects. Logs only non-204 responses
+    // so the call log isn't flooded with one line per second.
+    function claimTap() {
+      var url = API_BASE + '/pos/pending-tap/claim';
+      var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+      var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, 8000);
+      return fetch(url, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + apiToken, 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(USER_ID ? { userId: USER_ID } : {}),
+        signal: ctrl ? ctrl.signal : undefined
+      }).then(function (res) {
+        return res.text().then(function (txt) {
+          var body = null;
+          try { body = txt ? JSON.parse(txt) : null; } catch (e) { body = { raw: txt }; }
+          if (res.status !== 204) log('← ' + res.status + ' /pos/pending-tap/claim', body);
+          return { status: res.status, body: body, reset: res.headers && res.headers.get && res.headers.get('RateLimit-Reset') };
+        });
+      }).catch(function (err) {
+        if (pollFails === 0) log('✗ /pos/pending-tap/claim failed: ' + (err.name === 'AbortError' ? 'timed out' : err.message));
+        return { status: 0, body: null };
+      }).then(function (r) { clearTimeout(timer); return r; });
+    }
+
+    // ---------- Member card ----------
+    var FAKE_PHOTO = $('member-photo').getAttribute('src');
+
+    function memberName(m) {
+      return [m.firstName, m.lastName].filter(Boolean).join(' ') || m.name || m.displayName || 'Member';
+    }
+
+    // photoUrl is a relative API path (/pos/member-photo?tapId=…) behind the
+    // device token, so an <img src> can't load it: fetch it and show a blob.
+    var photoObjectUrl = null, photoSeq = 0;
+    function showPhoto(src) {
+      var img = $('member-photo'), seq = ++photoSeq;
+      if (photoObjectUrl) { URL.revokeObjectURL(photoObjectUrl); photoObjectUrl = null; }
+      img.classList.add('hidden');
+      if (!src) return;
+      if (/^data:/.test(src)) { img.src = src; img.classList.remove('hidden'); return; }
+      var url = /^https?:/.test(src) ? src : API_BASE + (src.charAt(0) === '/' ? '' : '/') + src;
+      fetch(url, { headers: { 'Authorization': 'Bearer ' + apiToken } }).then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.blob();
+      }).then(function (blob) {
+        if (seq !== photoSeq) return;          // a newer tap is on screen
+        photoObjectUrl = URL.createObjectURL(blob);
+        img.src = photoObjectUrl;
+        img.classList.remove('hidden');
+      }).catch(function (e) { log('Member photo not loaded (' + e.message + ')'); });
+    }
+
+    function renderMember(m, recognised) {
+      m = m || {};
+      showPhoto(recognised ? (m.photoUrl || m._fakePhoto || null) : null);
+      $('member-name').textContent = recognised ? memberName(m) : 'Not recognised';
+      var segments = Array.isArray(m.segments) ? m.segments.filter(Boolean) : (m.segment ? [m.segment] : []);
+      $('member-segment').textContent = recognised ? segments.join(' · ') : 'This card isn’t linked to an active member';
+      var status = String(m.status || 'active').toLowerCase();
+      $('member-status').textContent = status === 'active' ? 'Active member' : status.charAt(0).toUpperCase() + status.slice(1);
+      $('member-status').style.color = status === 'active' ? '' : 'var(--red)';
+      $('member-status').classList.toggle('hidden', !recognised);
+      var meta = [];
+      var id = m.tshId;
+      if (id) meta.push('TSH ID ' + id + (m.location ? ' · ' + m.location : ''));
+      if (m.validUntil) meta.push('Valid until ' + m.validUntil);
+      $('member-meta').textContent = meta.join('\n');
+      setDiscount('', 'Applying…');   // resets the box's classes, so hide it afterwards
+      $('discountBox').classList.toggle('hidden', !recognised);
+      showView('member-view');
+      if (recognised) { twirl(true); setTimeout(function () { twirl(false); }, 2200); }
     }
 
     // ---------- Recognition flow ----------
-    function onTap(source) {
-      clearTimeout(fakeTimer);
+    // tap = { tapId, tappedAt, recognised, member, discountCodes } from the claim endpoint.
+    var appliedCode = null;
+
+    function onTap(source, tap) {
+      if (!apiToken) { log('Tap ignored: device is not paired'); return; }
       if (busy) { log('Tap ignored: still processing the previous one'); return; }
       busy = true;
-      var m = STUDENT, code = $('code').value.trim();
-      log('— Tap (' + source + ') → ' + m.firstName + ' ' + m.lastName + ', ' + m.tshId + ' —');
-      renderMember(m);
+      stopPolling();
+      var m = tap.member || {};
+      var recognised = tap.recognised !== false && !!tap.member;
+      var codes = Array.isArray(tap.discountCodes) ? tap.discountCodes.filter(Boolean) : [];
+      var tshId = m.tshId;
+      log('— Tap (' + source + ') → ' + (recognised ? memberName(m) + ', ' + (tshId || 'no TSH ID') : 'not recognised') +
+          (tap.tappedAt ? ' · tapped ' + tap.tappedAt : '') + ' —');
+      renderMember(m, recognised);
+      appliedCode = null;
 
-      pos('pos_addExternalReference', [m.tshId, EXT_REF_PREFIX], -1).then(function () {
+      if (!recognised) { busy = false; return; }
+
+      var chain = Promise.resolve();
+      if (tshId) chain = chain.then(function () { return pos('pos_addExternalReference', [String(tshId), EXT_REF_PREFIX], -1); });
+      chain.then(function () {
         // No identifier: that field references a Lightspeed consumer UUID.
-        return pos('pos_setConsumer', [{ firstName: m.firstName, lastName: m.lastName }], -1);
+        return pos('pos_setConsumer', [{ firstName: m.firstName || memberName(m), lastName: m.lastName || '' }], -1);
       }).then(function () {
-        return applyDiscount(code);
+        if (!codes.length) { setDiscount('', 'No member reward'); return; }
+        // Lightspeed's global discount looks like one at a time: apply the
+        // first code and show the rest, until we know the priority rule.
+        if (codes.length > 1) log('Several discount codes returned, applying the first: ' + codes.join(', '));
+        appliedCode = codes[0];
+        return applyDiscount(codes[0]).then(function (ok) {
+          if (ok && codes.length > 1) $('discountText').textContent = codes[0] + ' (also eligible: ' + codes.slice(1).join(', ') + ')';
+        });
       }).then(function () {
         busy = false;
       });
     }
 
+    function fakeTap() {
+      var code = $('code').value.trim();
+      onTap('fake tap', {
+        tapId: 'fake-' + Date.now().toString(36), tappedAt: new Date().toISOString(), recognised: true,
+        member: Object.assign({ _fakePhoto: FAKE_PHOTO }, STUDENT), discountCodes: code ? [code] : []
+      });
+    }
+
     function applyDiscount(code) {
-      var label = code + ' · Student 20%';
+      var label = code;
       if ($('method').value === 'apply') {
         return pos('pos_applyGlobalManualDiscount', [code, undefined, null], 2).then(function (r) {
           if (hasError(r)) { setDiscount('failed', 'Could not apply ' + code); return false; }
@@ -364,7 +759,8 @@
     }
 
     function undoDiscount() {
-      var code = $('code').value.trim();
+      var code = appliedCode;
+      if (!code) return;
       $('undoBtn').disabled = true;
       accountHasCode(code).then(function (on) {
         if (on === false) { log(code + ' not on the account, nothing to undo'); return { data: 'noop' }; }
@@ -379,7 +775,8 @@
     function listen(name) {
       pos(name, [null], 0, true).then(function (r) {
         if (r.missing) return;
-        onTap(name + ': ' + fmt(r.data));
+        // Taps now come from the claim endpoint; POS scans are only logged for now.
+        log('Scan on the POS (' + name + ') received, not used for recognition yet');
         listen(name);
       });
     }
@@ -392,6 +789,26 @@
     $('btnAccount').onclick = function () { pos('pos_getCurrentAccount', [null], 0); };
     $('btnDiscounts').onclick = function () { pos('pos_getAvailableDiscounts', [null], 0); };
     $('btnContext').onclick = function () { log('posContext', window.posContext || '(not available)'); };
+    $('pair-form').onsubmit = onPairSubmit;
+    $('pairCode').addEventListener('input', function () {
+      var el = this, f = formatCode(el.value);
+      if (el.value !== f) el.value = f;
+      setPairMsg('');
+    });
+    $('btnTokenClear').onclick = function () {
+      // Store an empty string: no documented delete call.
+      pos('pos_storeData', [TOKEN_KEY, ''], -1).then(boot);
+    };
+    $('btnTokenFake').onclick = function () {
+      var t = window.prompt('Paste a device token (hpd_…)');
+      if (!t || !t.trim()) return;
+      stopPolling();
+      pos('pos_storeData', [TOKEN_KEY, t.trim()], -1, false, true).then(boot);
+    };
+    $('btnFakeTap').onclick = function () {
+      if (!apiToken) { log('Fake tap ignored: device is not paired'); return; }
+      fakeTap();
+    };
     $('clearLog').onclick = function () { logEl.textContent = ''; };
     $('copyLog').onclick = function () {
       var text = logEl.textContent;
@@ -410,13 +827,9 @@
       ? [c.businessName, 'location ' + (c.locationId || '?'), c.deviceName, c.userName].filter(Boolean).join(' · ')
       : 'Not running inside Lightspeed: pos_* calls are simulated';
 
-    log('Hub Pass POC loaded · ' + (LIVE ? 'Lightspeed bridge found' : 'no Lightspeed bridge, demo stubs active'));
-    if (LIVE) {
-      pos('pos_getAvailableDiscounts', [null], 0);
-      listen('pos_onBarcodeScanEvent');
-      listen('pos_onNFCEvent');
-    }
-    showIdle();
+    log('Hub Pass POC loaded · ' + (LIVE ? 'Lightspeed bridge found' : 'no Lightspeed bridge, demo stubs active') +
+        ' · deviceId ' + (DEVICE_ID || '(missing)'));
+    boot();
   })();
   </script>
 </body>
