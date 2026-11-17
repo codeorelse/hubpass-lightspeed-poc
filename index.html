@@ -47,6 +47,8 @@
     #idle-view .hint { font-size: clamp(2rem, 6vw, 3.5rem); color: var(--hint); letter-spacing: -0.02em; }
     .poll-status { font-size: .95rem; color: #555; margin-top: 16px; min-height: 1.3em; }
     .poll-status.error { color: var(--red); }
+    #idle-view .reader { margin-top: 40px; font-size: 1rem; color: #666; }
+    #idle-view .reader button { margin-top: 10px; }
 
     /* Pair device */
     #pair-view { text-align: center; padding: 8px 0 24px; }
@@ -151,19 +153,24 @@
 
     <section id="pair-view" class="hidden">
       <h1>Pair this device</h1>
-      <p class="lead">Ask a manager for a pairing code from the Membership Platform admin and enter it below.</p>
+      <p class="lead" id="pairLead">Ask a manager for a pairing code from the Membership Platform admin and enter it below.</p>
       <form id="pair-form" autocomplete="off">
         <input id="pairCode" inputmode="text" autocapitalize="characters" autocorrect="off" spellcheck="false"
                maxlength="9" placeholder="XXXX-XXXX" aria-label="Pairing code" />
         <div class="pair-reader">
-          <label class="field">Door ID
-            <input id="pairDoor" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Hub Pass reader door" />
-          </label>
           <label class="field">Area ID
-            <input id="pairArea" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Area this till serves" />
+            <select id="pairArea">
+              <option value="">Choose area</option>
+            </select>
+          </label>
+          <label class="field">Door ID
+            <select id="pairDoor" disabled>
+              <option value="">Choose area first</option>
+            </select>
           </label>
         </div>
         <button type="submit" class="primary" id="pairBtn">Pair device</button>
+        <button type="button" id="pairCancel" class="hidden">Cancel</button>
         <p id="pairMsg" role="status"></p>
       </form>
       <p id="pairDevice"></p>
@@ -172,6 +179,10 @@
     <section id="idle-view" class="hidden">
       <p class="hint">Waiting for tap...</p>
       <p id="pollStatus" class="poll-status"></p>
+      <div class="reader">
+        <p id="readerInfo"></p>
+        <button class="small" id="changeReaderBtn">Change tap device</button>
+      </div>
     </section>
 
     <section id="member-view" class="hidden">
@@ -258,6 +269,13 @@
     };
     var EXT_REF_PREFIX = 'TSHID';
     var TOKEN_KEY = 'apiToken';
+    var AREA_KEY = 'areaId', DOOR_KEY = 'doorId';
+    // Areas a till can serve, and the Hub Pass tap devices (Pis) in each.
+    // url is for reference only: not shown, so staff can't leave the POS through it.
+    var AREAS = [
+      { id: 'grandmother', doors: [{ id: 'AMS02-GM-PI-1', url: 'https://connect.raspberrypi.com/devices/43e1ed96-489b-4f40-8aec-1c1bcf12f0f1' }] },
+      { id: 'restaurant', doors: [{ id: 'AMS02-RR-PI', url: 'https://connect.raspberrypi.com/devices/43e1ed96-489b-4f40-8aec-1c1bcf12f0f1' }] }
+    ];
     var API_BASE = 'https://api.dev.guestplatform.thesocialhub.app';
     var QS = new URLSearchParams(location.search);
     // A URL param counts only if Lightspeed replaced its {placeholder}.
@@ -388,13 +406,16 @@
 
     // ---------- Device pairing ----------
     var apiToken = null, recognitionStarted = false;
+    // The area and door this till is paired with, and whether the pair form
+    // is changing an existing pairing rather than making the first one.
+    var pairedArea = null, pairedDoor = null, changing = false;
 
     // pos_loadData's callback shape isn't documented: accept a plain string,
     // or an object carrying the value.
-    function tokenFrom(data) {
+    function valueFrom(data, key) {
       if (typeof data === 'string') return data.trim() || null;
       if (data && typeof data === 'object') {
-        var v = data.value !== undefined ? data.value : data[TOKEN_KEY];
+        var v = data.value !== undefined ? data.value : data[key];
         return typeof v === 'string' && v.trim() ? v.trim() : null;
       }
       return null;
@@ -403,30 +424,69 @@
     function loadToken() {
       return pos('pos_loadData', [TOKEN_KEY, null], 1, false, true).then(function (r) {
         if (hasError(r)) { log('Could not read ' + TOKEN_KEY + ' from the device'); return null; }
-        return tokenFrom(r.data);
+        return valueFrom(r.data, TOKEN_KEY);
       });
     }
+
+    function loadValue(key) {
+      return pos('pos_loadData', [key, null], 1).then(function (r) {
+        return hasError(r) ? null : valueFrom(r.data, key);
+      });
+    }
+
+    // ---------- Area / door dropdowns ----------
+    function areaById(id) { return AREAS.filter(function (a) { return a.id === id; })[0] || null; }
+
+    function fillAreas() {
+      AREAS.forEach(function (a) { $('pairArea').appendChild(new Option(a.id, a.id)); });
+    }
+
+    // Lists only the doors of the chosen area; selects `selected` if it's one of them.
+    function fillDoors(selected) {
+      var sel = $('pairDoor'), area = areaById($('pairArea').value);
+      sel.innerHTML = '';
+      if (!area) { sel.appendChild(new Option('Choose area first', '')); sel.disabled = true; return; }
+      if (area.doors.length > 1) sel.appendChild(new Option('Choose door', ''));
+      area.doors.forEach(function (d) { sel.appendChild(new Option(d.id, d.id)); });
+      sel.disabled = false;
+      if (selected && area.doors.some(function (d) { return d.id === selected; })) sel.value = selected;
+    }
+
+    function selectReader(areaId, doorId) {
+      $('pairArea').value = areaById(areaId) ? areaId : '';
+      fillDoors(doorId);
+    }
+
+    function pairBtnLabel() { return changing ? 'Save tap device' : 'Pair device'; }
 
     function setPairMsg(text, isError) {
       $('pairMsg').textContent = text || '';
       $('pairMsg').className = isError ? 'error' : '';
     }
 
-    function showPair(message, isError) {
+    // change = true: re-pair a till that's already paired, with a way back.
+    function showPair(message, isError, change) {
+      changing = !!change;
       stopPolling();
       twirl(false);
       $('pair-view').classList.remove('paired');
-      $('pair-view').querySelector('h1').textContent = 'Pair this device';
+      $('pair-view').querySelector('h1').textContent = changing ? 'Change tap device' : 'Pair this device';
+      $('pairLead').textContent = changing
+        ? 'Choose the tap device this till should use.'
+        : 'Ask a manager for a pairing code from the Membership Platform admin and enter it below.';
+      // Changing keeps the device token, so no pairing code is needed.
+      $('pairCode').classList.toggle('hidden', changing);
       setPairMsg(message, isError);
-      if (!$('pairDoor').value && qp('doorId')) $('pairDoor').value = qp('doorId');
-      if (!$('pairArea').value && qp('areaId')) $('pairArea').value = qp('areaId');
+      selectReader(pairedArea || qp('areaId'), pairedDoor || qp('doorId'));
       $('pairDevice').textContent = DEVICE_ID
         ? 'Device ID ' + DEVICE_ID + (DEVICE_NAME ? ' · ' + DEVICE_NAME : '') + (LOCATION_ID ? ' · location ' + LOCATION_ID : '')
         : 'No device ID found: add ?deviceId={deviceId} to the extension URL';
       $('pairBtn').disabled = !DEVICE_ID;
-      $('pairBtn').textContent = 'Pair device';
+      $('pairBtn').textContent = pairBtnLabel();
+      $('pairCancel').disabled = false;
+      $('pairCancel').classList.toggle('hidden', !changing);
       showView('pair-view');
-      setTimeout(function () { $('pairCode').focus(); }, 50);
+      if (!changing) setTimeout(function () { $('pairCode').focus(); }, 50);
     }
 
     // POST /pos/pair. Resolves { ok, status, body } and never rejects.
@@ -454,6 +514,78 @@
       }).then(function (r) { clearTimeout(timer); return r; });
     }
 
+    // PATCH /pos/device with the device token: moves this till to another
+    // tap device. Resolves { ok, status, body } and never rejects.
+    var DEVICE_PATH = '/pos/device';
+    function updateReader(payload) {
+      var url = API_BASE + DEVICE_PATH;
+      log('→ PATCH ' + url, payload);
+      var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+      var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, 15000);
+      return fetch(url, {
+        method: 'PATCH',
+        headers: { 'Authorization': 'Bearer ' + apiToken, 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: ctrl ? ctrl.signal : undefined
+      }).then(function (res) {
+        return res.text().then(function (txt) {
+          var body = null;
+          try { body = txt ? JSON.parse(txt) : null; } catch (e) { body = { raw: txt }; }
+          log('← ' + res.status + ' ' + DEVICE_PATH, maskDeep(body));
+          return { ok: res.ok, status: res.status, body: body };
+        });
+      }).catch(function (err) {
+        log('✗ ' + DEVICE_PATH + ' failed: ' + (err.name === 'AbortError' ? 'timed out after 15 s' : err.message));
+        return { ok: false, status: 0, body: null, timeout: err.name === 'AbortError' };
+      }).then(function (r) { clearTimeout(timer); return r; });
+    }
+
+    function readerErrorText(r) {
+      var code = r.body && r.body.error;
+      if (r.status === 404 || r.status === 405) return 'The Membership Service can’t change the tap device yet (' + r.status + ').';
+      if (r.status === 400) return 'The change was rejected' + (code ? ' (' + code + ')' : '') + '. Check the area and door.';
+      if (r.status === 429) return 'Too many attempts. Wait a minute and try again.';
+      if (r.status === 0) return r.timeout
+        ? 'The Membership Service didn’t respond. Check the connection and try again.'
+        : 'Couldn’t reach the Membership Service (network or CORS).';
+      return 'Changing the tap device failed (' + r.status + (code ? ' ' + code : '') + '). Try again.';
+    }
+
+    function saveReader() {
+      var doorId = $('pairDoor').value;
+      var areaId = $('pairArea').value;
+      if (!areaId || !doorId) { setPairMsg('Choose the area and door this till serves.', true); return; }
+      if (areaId === pairedArea && doorId === pairedDoor) { showIdle(); return; }
+
+      $('pairBtn').disabled = true;
+      $('pairCancel').disabled = true;
+      $('pairBtn').textContent = 'Saving…';
+      setPairMsg('');
+
+      updateReader({ deviceId: DEVICE_ID, doorId: doorId, areaId: areaId }).then(function (r) {
+        if (r.status === 401 || r.status === 403) { tokenRejected(r.status); return; }
+        if (!r.ok) {
+          $('pairBtn').disabled = false;
+          $('pairCancel').disabled = false;
+          $('pairBtn').textContent = pairBtnLabel();
+          setPairMsg(readerErrorText(r), true);
+          return;
+        }
+        pairedArea = areaId; pairedDoor = doorId;
+        return pos('pos_storeData', [AREA_KEY, areaId], -1).then(function () {
+          return pos('pos_storeData', [DOOR_KEY, doorId], -1);
+        }).then(function () {
+          $('pairCancel').classList.add('hidden');
+          $('pair-view').classList.add('paired');
+          $('pair-view').querySelector('h1').textContent = 'Tap device changed';
+          setPairMsg('This till now uses ' + doorId + ' (' + areaId + ').');
+          $('pairBtn').textContent = 'Saved';
+          twirl(true);
+          setTimeout(showIdle, 1800);
+        });
+      });
+    }
+
     function pairErrorText(r) {
       var code = r.body && r.body.error;
       if (r.status === 429 || code === 'rate_limited') return 'Too many attempts. Wait a minute and try again.';
@@ -474,14 +606,15 @@
 
     function onPairSubmit(e) {
       e.preventDefault();
+      if (changing) { saveReader(); return; }
       var code = formatCode($('pairCode').value);
       $('pairCode').value = code;
-      var doorId = $('pairDoor').value.trim();
-      var areaId = $('pairArea').value.trim();
+      var doorId = $('pairDoor').value;
+      var areaId = $('pairArea').value;
       if (!DEVICE_ID) { setPairMsg('No device ID in the URL, pairing is not possible.', true); return; }
       if (!code) { setPairMsg('Enter the pairing code first.', true); $('pairCode').focus(); return; }
       if (!CODE_RE.test(code)) { setPairMsg('A pairing code has 8 characters, like BHPZ-HH6T.', true); $('pairCode').focus(); return; }
-      if (!doorId || !areaId) { setPairMsg('Enter the door ID and area ID of the reader this till serves.', true); return; }
+      if (!areaId || !doorId) { setPairMsg('Choose the area and door this till serves.', true); return; }
 
       var payload = { code: code, deviceId: DEVICE_ID, doorId: doorId, areaId: areaId };
       if (LOCATION_ID) payload.locationId = LOCATION_ID;
@@ -495,14 +628,19 @@
         var token = r.ok && r.body && typeof r.body.token === 'string' ? r.body.token : null;
         if (!token) {
           $('pairBtn').disabled = false;
-          $('pairBtn').textContent = 'Pair device';
+          $('pairBtn').textContent = pairBtnLabel();
           setPairMsg(r.ok ? 'Paired, but no token came back. Ask for a new code.' : pairErrorText(r), true);
           return;
         }
         // The token is only returned once: keep it in memory first, then
         // store it and read it back to be sure it survived.
         apiToken = token;
-        return pos('pos_storeData', [TOKEN_KEY, token], -1, false, true).then(function () {
+        pairedArea = areaId; pairedDoor = doorId;
+        return pos('pos_storeData', [AREA_KEY, areaId], -1).then(function () {
+          return pos('pos_storeData', [DOOR_KEY, doorId], -1);
+        }).then(function () {
+          return pos('pos_storeData', [TOKEN_KEY, token], -1, false, true);
+        }).then(function () {
           return loadToken();
         }).then(function (stored) {
           var device = r.body.device || {};
@@ -537,13 +675,20 @@
       showView('checking-view');
       loadToken().then(function (token) {
         apiToken = token;
-        if (token) { log('Device token found, starting recognition'); startRecognition(); }
+        return Promise.all([loadValue(AREA_KEY), loadValue(DOOR_KEY)]);
+      }).then(function (saved) {
+        pairedArea = saved[0]; pairedDoor = saved[1];
+        if (apiToken) { log('Device token found, starting recognition'); startRecognition(); }
         else { log('No device token, showing pairing screen'); showPair(); }
       });
     }
 
     function showIdle() {
+      changing = false;
       twirl(false);
+      $('readerInfo').textContent = pairedDoor
+        ? 'Tap device ' + pairedDoor + (pairedArea ? ' · ' + pairedArea : '')
+        : 'Tap device not saved on this till';
       showView('idle-view');
       startPolling();
     }
@@ -568,6 +713,16 @@
       log('Polling for taps every ' + POLL_MS / 1000 + ' s');
       setPollStatus('Listening for taps');
       pollOnce(seq);
+    }
+
+    // The server no longer accepts this till's token: forget it and pair again.
+    function tokenRejected(status) {
+      stopPolling();
+      log('Device token rejected (' + status + '): clearing it, pair again');
+      apiToken = null;
+      pos('pos_storeData', [TOKEN_KEY, ''], -1).then(function () {
+        showPair('This till is no longer paired. Ask for a new pairing code.', true);
+      });
     }
 
     function stopPolling() {
@@ -607,12 +762,7 @@
           log('Tap already claimed by another till');
           scheduleNext(seq, POLL_MS);
         } else if (r.status === 401 || r.status === 403) {
-          stopPolling();
-          log('Device token rejected (' + r.status + '): clearing it, pair again');
-          apiToken = null;
-          pos('pos_storeData', [TOKEN_KEY, ''], -1).then(function () {
-            showPair('This till is no longer paired. Ask for a new pairing code.', true);
-          });
+          tokenRejected(r.status);
         } else if (r.status === 429) {
           var wait = Math.max(5, parseInt(r.reset, 10) || 0);
           log('Rate limited, pausing polling for ' + wait + ' s');
@@ -801,6 +951,11 @@
     $('btnDiscounts').onclick = function () { pos('pos_getAvailableDiscounts', [null], 0); };
     $('btnContext').onclick = function () { log('posContext', window.posContext || '(not available)'); };
     $('pair-form').onsubmit = onPairSubmit;
+    fillAreas();
+    $('pairArea').onchange = function () { fillDoors(); setPairMsg(''); };
+    $('changeReaderBtn').onclick = function () { showPair('', false, true); };
+    // Back to the waiting screen; the current pairing and token stay as they were.
+    $('pairCancel').onclick = function () { $('pairCode').value = ''; showIdle(); };
     $('pairCode').addEventListener('input', function () {
       var el = this, f = formatCode(el.value);
       if (el.value !== f) el.value = f;
