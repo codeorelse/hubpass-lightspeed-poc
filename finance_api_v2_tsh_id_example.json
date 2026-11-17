@@ -1,0 +1,106 @@
+{
+  "sales": [
+    {
+      "accountReference": "7lLD9PEuQdu1pbcQPapIqg==",
+      "accountFiscId": "A158484.4",
+      "receiptId": "R158484.4",
+      "source": {
+        "initialAccountId": "A158484.4"
+      },
+      "salesLines": [
+        {
+          "id": "S158484.5",
+          "totalNetAmountWithTax": "5.800000",
+          "totalNetAmountWithoutTax": "4.793388",
+          "menuListPrice": "5.80",
+          "unitCostPrice": "0.00",
+          "serviceCharge": "0.00",
+          "serviceChargeType": "NO_SERVICE_CHARGE",
+          "discountAmount": "0.00",
+          "taxCode": "TVAN21",
+          "taxAmount": "1.006612",
+          "taxRatePercentage": "21.00",
+          "taxLines": [
+            {
+              "taxId": "1128055980425222",
+              "taxCode": "TVAN21",
+              "taxRate": "1.21",
+              "taxAmount": "1.006612",
+              "taxIncluded": true
+            }
+          ],
+          "accountDiscountAmount": "0.00",
+          "totalDiscountAmount": "0.00",
+          "sku": "10133",
+          "name": "Lowlander citrus blonde - Gluten free",
+          "statisticGroup": "BEVERAGE ALCOHOL",
+          "quantity": "1.000",
+          "accountingGroup": {
+            "accountingGroupId": 1128055980425446,
+            "name": "BEVERAGE ALCOHOL",
+            "code": ""
+          },
+          "currency": "EUR",
+          "tags": [],
+          "revenueCenter": "Fixed POS",
+          "revenueCenterId": 1128055980425227,
+          "categories": [
+            {
+              "category": "default",
+              "value": "BEVERAGE ALCOHOL"
+            }
+          ],
+          "timeOfSale": "2026-10-20T18:56:39.421Z",
+          "staffId": 245920,
+          "staffName": "shiemstra",
+          "deviceId": 158484,
+          "deviceName": "iPad1",
+          "accountProfileCode": ""
+        }
+      ],
+      "payments": [
+        {
+          "code": "CASH",
+          "description": "Cash",
+          "paymentMethodId": 1128055980425230,
+          "netAmountWithTax": "5.80",
+          "currency": "EUR",
+          "tip": "0.00",
+          "consumer": {
+            "id": "14af8d18-e50c-4b26-aa01-86c3073e4b1f",
+            "customerId": 6397132,
+            "firstName": "Lala",
+            "lastName": "Fgfg"
+          },
+          "type": "NORMAL",
+          "deviceId": "158484",
+          "deviceName": "iPad1",
+          "staffId": 245920,
+          "staffName": "shiemstra",
+          "revenueCenter": "Fixed POS",
+          "revenueCenterId": 1128055980425227,
+          "fiscId": "T158484.4",
+          "uuid": "3upxwSTERRakkG_nQWt37w==",
+          "fiscDate": "2026-10-20T18:57:44.098Z",
+          "surcharge": "0.00",
+          "roundingAmount": "0.00"
+        }
+      ],
+      "timeOfOpening": "2026-10-20T18:56:21.079Z",
+      "timeClosed": "2026-10-20T18:57:44.137Z",
+      "tableNumber": "1",
+      "tableName": "WorkCafe, Table 1",
+      "accountProfileCode": "",
+      "ownerName": "shiemstra",
+      "ownerId": 245920,
+      "type": "SALE",
+      "externalReferences": [
+        "Tshid:RRTTR"
+      ],
+      "nbCovers": 1.0,
+      "dineIn": true,
+      "deviceId": 158484,
+      "deviceName": "iPad1"
+    }
+  ]
+}
